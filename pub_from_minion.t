@@ -19,6 +19,7 @@ $minion->add_task(
   send_back => sub ($job) {
 
     # send back a message using app's pg helper, then just finish
+    $job->app->pg->pubsub->reset if $job->app->mode ne 'production';
     $job->app->pg->pubsub->notify(channel => "Hello from minion job");
     $job->finish;
   }
@@ -35,13 +36,6 @@ get '/' => sub ($c) {
   );
   my $job_id = $c->minion->enqueue('send_back');
 
-  # $c->minion->perform_jobs_in_foreground;   # this works
-  $c->minion->perform_jobs;    # this doesn't
-      # also, if you comment out both lines above, and run the minion worker
-      # from another terminal, like this:
-      # $> perl pub_from_minion.t minion worker
-      # then everything works fine.
-
   # will check for finished minion, just using a small interval
   $c->minion->result_p($job_id, {interval => .1})->then(sub ($info) {
     $c->pg->pubsub->unlisten(channel => $cb);
@@ -50,7 +44,11 @@ get '/' => sub ($c) {
     $c->render(text => "Error: $info");
   });
 };
-
+Mojo::IOLoop->recurring(
+  1 => sub {
+    $minion->perform_jobs;
+  }
+) if app->mode ne 'production';
 app->start;    # this is needed for the minion worker when called standalone
 
 my $t = Test::Mojo->new;
